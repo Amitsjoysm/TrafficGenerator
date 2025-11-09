@@ -14,6 +14,8 @@ from bs4 import BeautifulSoup
 import re
 from groq import Groq
 import json
+import textstat
+from collections import Counter
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -39,6 +41,22 @@ class ContentCreate(BaseModel):
     content: Optional[str] = None
     input_type: str  # 'url' or 'manual'
 
+class SocialMediaPost(BaseModel):
+    platform: str
+    post_text: str
+    hashtags: List[str]
+
+class FAQItem(BaseModel):
+    question: str
+    answer: str
+
+class ContentOptimization(BaseModel):
+    readability_score: float
+    reading_level: str
+    keyword_density: Dict[str, float]
+    word_count: int
+    recommendations: List[str]
+
 class Content(BaseModel):
     model_config = ConfigDict(extra="ignore")
     
@@ -53,6 +71,15 @@ class Content(BaseModel):
     performance_score: float = 0.0
     views: int = 0
     llm_queries: int = 0
+    
+    # New fields for enhanced features
+    social_posts: List[Dict[str, Any]] = Field(default_factory=list)
+    faqs: List[Dict[str, str]] = Field(default_factory=list)
+    voice_queries: List[str] = Field(default_factory=list)
+    content_optimization: Optional[Dict[str, Any]] = None
+    open_graph_tags: Optional[Dict[str, str]] = None
+    twitter_card_tags: Optional[Dict[str, str]] = None
+    
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -64,12 +91,14 @@ class SyntheticQuery(BaseModel):
     query: str
     response: str
     relevance_score: float
+    query_type: str = "standard"  # standard, voice, conversational
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AnalyticsData(BaseModel):
     total_content: int
     total_queries: int
     avg_performance_score: float
+    avg_readability_score: float
     top_performing: List[Dict[str, Any]]
     recent_queries: List[Dict[str, Any]]
 
@@ -100,9 +129,71 @@ async def crawl_url(url: str) -> Dict[str, str]:
                 # Clean content
                 content = re.sub(r'\s+', ' ', content).strip()
                 
-                return {"title": title_text, "content": content[:5000]}  # Limit content length
+                return {"title": title_text, "content": content[:8000]}  # Increased limit
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to crawl URL: {str(e)}")
+
+def calculate_content_optimization(content: str) -> Dict[str, Any]:
+    """Calculate readability and content optimization metrics"""
+    try:
+        # Calculate readability scores
+        flesch_score = textstat.flesch_reading_ease(content)
+        flesch_grade = textstat.flesch_kincaid_grade(content)
+        
+        # Determine reading level
+        if flesch_score >= 90:
+            reading_level = "Very Easy (5th grade)"
+        elif flesch_score >= 80:
+            reading_level = "Easy (6th grade)"
+        elif flesch_score >= 70:
+            reading_level = "Fairly Easy (7th grade)"
+        elif flesch_score >= 60:
+            reading_level = "Standard (8th-9th grade)"
+        elif flesch_score >= 50:
+            reading_level = "Fairly Difficult (10th-12th grade)"
+        elif flesch_score >= 30:
+            reading_level = "Difficult (College)"
+        else:
+            reading_level = "Very Difficult (College graduate)"
+        
+        # Calculate word count
+        words = content.split()
+        word_count = len(words)
+        
+        # Calculate keyword density (top 10 words)
+        words_lower = [w.lower() for w in words if len(w) > 4]  # Filter out short words
+        word_freq = Counter(words_lower)
+        top_words = dict(word_freq.most_common(10))
+        keyword_density = {word: round((count / word_count) * 100, 2) for word, count in top_words.items()}
+        
+        # Generate recommendations
+        recommendations = []
+        if flesch_score < 60:
+            recommendations.append("Consider simplifying sentences for better readability")
+        if word_count < 300:
+            recommendations.append("Content is too short. Aim for 500+ words for better SEO")
+        elif word_count > 2000:
+            recommendations.append("Content is very long. Consider breaking into multiple pages")
+        if flesch_grade > 12:
+            recommendations.append("Reading level is high. Simplify for broader audience")
+        
+        return {
+            "readability_score": round(flesch_score, 2),
+            "reading_level": reading_level,
+            "flesch_kincaid_grade": round(flesch_grade, 2),
+            "keyword_density": keyword_density,
+            "word_count": word_count,
+            "recommendations": recommendations
+        }
+    except Exception as e:
+        logging.error(f"Error calculating optimization: {str(e)}")
+        return {
+            "readability_score": 50,
+            "reading_level": "Standard",
+            "keyword_density": {},
+            "word_count": len(content.split()),
+            "recommendations": []
+        }
 
 def generate_optimized_metadata(title: str, content: str) -> Dict[str, Any]:
     """Generate LLM-optimized metadata using Groq"""
@@ -147,9 +238,119 @@ Respond in JSON format:
             "performance_score": 50
         }
 
-def generate_structured_data(title: str, content: str, url: Optional[str]) -> Dict[str, Any]:
-    """Generate Schema.org structured data"""
-    return {
+def generate_social_media_posts(title: str, content: str, keywords: List[str]) -> List[Dict[str, Any]]:
+    """Generate social media posts for different platforms"""
+    try:
+        prompt = f"""Create engaging social media posts for this content:
+
+Title: {title}
+Content: {content[:1000]}
+Keywords: {', '.join(keywords[:5])}
+
+Generate posts for:
+1. Twitter (max 280 chars, include 3 hashtags)
+2. LinkedIn (professional tone, 150 chars, 2 hashtags)
+3. Facebook (engaging, 200 chars, 3 hashtags)
+
+Respond in JSON format:
+{{
+  "twitter": {{"post": "...", "hashtags": ["...", "...", "..."]}},
+  "linkedin": {{"post": "...", "hashtags": ["...", "..."]}},
+  "facebook": {{"post": "...", "hashtags": ["...", "...", "..."]}}
+}}"""
+        
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a social media expert. Always respond with valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=600
+        )
+        
+        result = json.loads(response.choices[0].message.content)
+        
+        posts = []
+        for platform, data in result.items():
+            posts.append({
+                "platform": platform.capitalize(),
+                "post_text": data["post"],
+                "hashtags": data["hashtags"]
+            })
+        
+        return posts
+    except Exception as e:
+        logging.error(f"Error generating social posts: {str(e)}")
+        return []
+
+def generate_faqs(title: str, content: str) -> List[Dict[str, str]]:
+    """Generate FAQ section for better LLM pickup"""
+    try:
+        prompt = f"""Generate 5 frequently asked questions and answers based on this content:
+
+Title: {title}
+Content: {content[:1500]}
+
+Provide questions that users might ask about this topic, with clear, concise answers.
+
+Respond in JSON format:
+[
+  {{"question": "...", "answer": "..."}},
+  {{"question": "...", "answer": "..."}}
+]"""
+        
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a content expert. Always respond with valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=800
+        )
+        
+        faqs = json.loads(response.choices[0].message.content)
+        return faqs if isinstance(faqs, list) else []
+    except Exception as e:
+        logging.error(f"Error generating FAQs: {str(e)}")
+        return []
+
+def generate_voice_queries(title: str, content: str) -> List[str]:
+    """Generate voice search and conversational queries"""
+    try:
+        prompt = f"""Generate 5 voice search queries (conversational, question-based) that users might ask:
+
+Title: {title}
+Content: {content[:1000]}
+
+Examples:
+- "Hey Siri, what is..."
+- "Alexa, how do I..."
+- "OK Google, tell me about..."
+
+Provide natural, conversational queries as a JSON array:
+["query1", "query2", "query3", "query4", "query5"]"""
+        
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a voice search expert. Always respond with valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=400
+        )
+        
+        queries = json.loads(response.choices[0].message.content)
+        return queries if isinstance(queries, list) else []
+    except Exception as e:
+        logging.error(f"Error generating voice queries: {str(e)}")
+        return []
+
+def generate_structured_data(title: str, content: str, url: Optional[str], faqs: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Generate Schema.org structured data with FAQs"""
+    structured_data = {
         "@context": "https://schema.org",
         "@type": "Article",
         "headline": title,
@@ -160,6 +361,42 @@ def generate_structured_data(title: str, content: str, url: Optional[str]) -> Di
             "@type": "Person",
             "name": "Content Creator"
         }
+    }
+    
+    # Add FAQ schema if available
+    if faqs:
+        structured_data["mainEntity"] = {
+            "@type": "FAQPage",
+            "mainEntity": [
+                {
+                    "@type": "Question",
+                    "name": faq["question"],
+                    "acceptedAnswer": {
+                        "@type": "Answer",
+                        "text": faq["answer"]
+                    }
+                } for faq in faqs[:5]
+            ]
+        }
+    
+    return structured_data
+
+def generate_open_graph_tags(title: str, description: str, url: Optional[str]) -> Dict[str, str]:
+    """Generate Open Graph meta tags for social sharing"""
+    return {
+        "og:title": title,
+        "og:description": description,
+        "og:type": "article",
+        "og:url": url or "",
+        "og:site_name": "Traffic Wizard"
+    }
+
+def generate_twitter_card_tags(title: str, description: str) -> Dict[str, str]:
+    """Generate Twitter Card meta tags"""
+    return {
+        "twitter:card": "summary_large_image",
+        "twitter:title": title,
+        "twitter:description": description
     }
 
 async def generate_synthetic_queries(content_id: str, title: str, content: str) -> List[str]:
@@ -208,22 +445,38 @@ async def create_content(input: ContentCreate):
             content = input.content or ""
             url = None
         
-        # Generate optimized metadata
+        # Generate all optimizations
         metadata = generate_optimized_metadata(title, content)
+        content_optimization = calculate_content_optimization(content)
+        faqs = generate_faqs(title, content)
+        social_posts = generate_social_media_posts(title, content, metadata.get('keywords', []))
+        voice_queries = generate_voice_queries(title, content)
         
-        # Generate structured data
-        structured_data = generate_structured_data(title, content, url)
+        # Generate structured data with FAQs
+        structured_data = generate_structured_data(title, content, url, faqs)
+        
+        # Generate Open Graph and Twitter Card tags
+        optimized_title = metadata.get('optimized_title', title)
+        optimized_description = metadata.get('optimized_description', content[:160])
+        open_graph_tags = generate_open_graph_tags(optimized_title, optimized_description, url)
+        twitter_card_tags = generate_twitter_card_tags(optimized_title, optimized_description)
         
         # Create content object
         content_obj = Content(
             url=url,
             title=title,
             content=content,
-            optimized_title=metadata.get('optimized_title', title),
-            optimized_description=metadata.get('optimized_description', content[:160]),
+            optimized_title=optimized_title,
+            optimized_description=optimized_description,
             keywords=metadata.get('keywords', []),
             structured_data=structured_data,
-            performance_score=metadata.get('performance_score', 50)
+            performance_score=metadata.get('performance_score', 50),
+            social_posts=social_posts,
+            faqs=faqs,
+            voice_queries=voice_queries,
+            content_optimization=content_optimization,
+            open_graph_tags=open_graph_tags,
+            twitter_card_tags=twitter_card_tags
         )
         
         # Save to database
@@ -233,14 +486,28 @@ async def create_content(input: ContentCreate):
         
         await db.contents.insert_one(doc)
         
-        # Generate synthetic queries in background
+        # Generate standard synthetic queries
         queries = await generate_synthetic_queries(content_obj.id, title, content)
         for query in queries:
             query_obj = SyntheticQuery(
                 content_id=content_obj.id,
                 query=query,
                 response=f"Based on our content: {content[:200]}...",
-                relevance_score=85.0
+                relevance_score=85.0,
+                query_type="standard"
+            )
+            query_doc = query_obj.model_dump()
+            query_doc['created_at'] = query_doc['created_at'].isoformat()
+            await db.queries.insert_one(query_doc)
+        
+        # Store voice queries as well
+        for voice_query in voice_queries:
+            query_obj = SyntheticQuery(
+                content_id=content_obj.id,
+                query=voice_query,
+                response=f"Voice search result: {content[:200]}...",
+                relevance_score=90.0,
+                query_type="voice"
             )
             query_doc = query_obj.model_dump()
             query_doc['created_at'] = query_doc['created_at'].isoformat()
@@ -318,6 +585,14 @@ async def get_analytics():
     avg_result = await db.contents.aggregate(pipeline).to_list(1)
     avg_score = avg_result[0]['avg_score'] if avg_result else 0
     
+    # Calculate average readability score
+    readability_pipeline = [
+        {"$match": {"content_optimization.readability_score": {"$exists": True}}},
+        {"$group": {"_id": None, "avg_readability": {"$avg": "$content_optimization.readability_score"}}}
+    ]
+    readability_result = await db.contents.aggregate(readability_pipeline).to_list(1)
+    avg_readability = readability_result[0]['avg_readability'] if readability_result else 0
+    
     # Get top performing content
     top_content = await db.contents.find(
         {}, {"_id": 0, "id": 1, "title": 1, "performance_score": 1, "views": 1}
@@ -325,13 +600,14 @@ async def get_analytics():
     
     # Get recent queries
     recent_queries = await db.queries.find(
-        {}, {"_id": 0, "query": 1, "relevance_score": 1, "created_at": 1}
+        {}, {"_id": 0, "query": 1, "relevance_score": 1, "query_type": 1, "created_at": 1}
     ).sort("created_at", -1).limit(10).to_list(10)
     
     return AnalyticsData(
         total_content=total_content,
         total_queries=total_queries,
         avg_performance_score=round(avg_score, 2),
+        avg_readability_score=round(avg_readability, 2),
         top_performing=top_content,
         recent_queries=recent_queries
     )

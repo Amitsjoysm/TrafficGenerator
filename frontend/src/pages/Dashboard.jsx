@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API } from '../App';
 import { useNavigate } from 'react-router-dom';
-import { Plus, TrendingUp, FileText, Zap, Eye, Search, Trash2 } from 'lucide-react';
+import { Plus, TrendingUp, FileText, Zap, Eye, Search, Trash2, BarChart3 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
@@ -84,7 +84,7 @@ const Dashboard = () => {
               <h1 className="text-4xl md:text-5xl font-bold gradient-text mb-2" data-testid="dashboard-title">
                 Traffic Wizard
               </h1>
-              <p className="text-base text-gray-600">Generate organic LLM traffic for your content</p>
+              <p className="text-base text-gray-600">Generate organic LLM traffic with advanced optimization</p>
             </div>
             <Button
               onClick={() => navigate('/add')}
@@ -98,7 +98,7 @@ const Dashboard = () => {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 fade-in">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 fade-in">
           <div className="stat-card" data-testid="total-content-stat">
             <div className="flex items-center justify-between">
               <div>
@@ -122,10 +122,20 @@ const Dashboard = () => {
           <div className="stat-card" style={{background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'}} data-testid="avg-performance-stat">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm opacity-90 mb-1">Avg Performance</p>
+                <p className="text-sm opacity-90 mb-1">Avg SEO Score</p>
                 <h3 className="text-3xl font-bold">{analytics?.avg_performance_score || 0}%</h3>
               </div>
               <TrendingUp size={40} className="opacity-80" />
+            </div>
+          </div>
+
+          <div className="stat-card" style={{background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'}} data-testid="avg-readability-stat">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm opacity-90 mb-1">Avg Readability</p>
+                <h3 className="text-3xl font-bold">{analytics?.avg_readability_score?.toFixed(0) || 0}</h3>
+              </div>
+              <BarChart3 size={40} className="opacity-80" />
             </div>
           </div>
         </div>
@@ -183,9 +193,16 @@ const Dashboard = () => {
                       <h3 className="text-lg font-semibold text-gray-800 flex-1 pr-4" data-testid={`content-title-${index}`}>
                         {content.optimized_title || content.title}
                       </h3>
-                      <span className="score-badge" data-testid={`content-score-${index}`}>
-                        {content.performance_score}%
-                      </span>
+                      <div className="flex gap-2">
+                        <span className="score-badge" data-testid={`content-score-${index}`}>
+                          SEO: {content.performance_score}%
+                        </span>
+                        {content.content_optimization?.readability_score && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-3 py-2 rounded-full font-semibold" data-testid={`readability-score-${index}`}>
+                            Read: {content.content_optimization.readability_score}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     
                     <p className="text-sm text-gray-600 mb-3 line-clamp-2" data-testid={`content-description-${index}`}>
@@ -205,6 +222,17 @@ const Dashboard = () => {
                         <Eye size={16} />
                         {content.views || 0} views
                       </span>
+                      {content.social_posts && content.social_posts.length > 0 && (
+                        <span className="flex items-center gap-1 text-purple-600">
+                          <Zap size={16} />
+                          {content.social_posts.length} social posts
+                        </span>
+                      )}
+                      {content.faqs && content.faqs.length > 0 && (
+                        <span className="flex items-center gap-1 text-green-600">
+                          {content.faqs.length} FAQs
+                        </span>
+                      )}
                       {content.url && (
                         <a 
                           href={content.url} 
