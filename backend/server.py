@@ -16,6 +16,19 @@ from groq import Groq
 import json
 import textstat
 from collections import Counter
+from advanced_optimization import (
+    extract_entities,
+    extract_citation_snippets,
+    calculate_topic_authority,
+    generate_semantic_enrichment,
+    analyze_search_intent,
+    generate_people_also_ask,
+    calculate_content_quality_score,
+    generate_answer_box_content,
+    generate_internal_linking_suggestions,
+    generate_backlink_anchor_texts,
+    calculate_content_freshness
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -41,22 +54,6 @@ class ContentCreate(BaseModel):
     content: Optional[str] = None
     input_type: str  # 'url' or 'manual'
 
-class SocialMediaPost(BaseModel):
-    platform: str
-    post_text: str
-    hashtags: List[str]
-
-class FAQItem(BaseModel):
-    question: str
-    answer: str
-
-class ContentOptimization(BaseModel):
-    readability_score: float
-    reading_level: str
-    keyword_density: Dict[str, float]
-    word_count: int
-    recommendations: List[str]
-
 class Content(BaseModel):
     model_config = ConfigDict(extra="ignore")
     
@@ -72,13 +69,26 @@ class Content(BaseModel):
     views: int = 0
     llm_queries: int = 0
     
-    # New fields for enhanced features
+    # Enhanced features
     social_posts: List[Dict[str, Any]] = Field(default_factory=list)
     faqs: List[Dict[str, str]] = Field(default_factory=list)
     voice_queries: List[str] = Field(default_factory=list)
     content_optimization: Optional[Dict[str, Any]] = None
     open_graph_tags: Optional[Dict[str, str]] = None
     twitter_card_tags: Optional[Dict[str, str]] = None
+    
+    # Advanced features
+    entities: Optional[Dict[str, List[str]]] = None
+    citation_snippets: List[Dict[str, str]] = Field(default_factory=list)
+    topic_authority: Optional[Dict[str, Any]] = None
+    semantic_enrichment: Optional[Dict[str, List[str]]] = None
+    search_intent: Optional[Dict[str, Any]] = None
+    people_also_ask: List[str] = Field(default_factory=list)
+    quality_score: Optional[Dict[str, Any]] = None
+    answer_box_content: Optional[Dict[str, Any]] = None
+    internal_linking: List[Dict[str, str]] = Field(default_factory=list)
+    backlink_anchors: List[Dict[str, str]] = Field(default_factory=list)
+    freshness: Optional[Dict[str, Any]] = None
     
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -91,7 +101,7 @@ class SyntheticQuery(BaseModel):
     query: str
     response: str
     relevance_score: float
-    query_type: str = "standard"  # standard, voice, conversational
+    query_type: str = "standard"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AnalyticsData(BaseModel):
@@ -99,6 +109,7 @@ class AnalyticsData(BaseModel):
     total_queries: int
     avg_performance_score: float
     avg_readability_score: float
+    avg_quality_score: float
     top_performing: List[Dict[str, Any]]
     recent_queries: List[Dict[str, Any]]
 
@@ -114,33 +125,26 @@ async def crawl_url(url: str) -> Dict[str, str]:
                 html = await response.text()
                 soup = BeautifulSoup(html, 'html.parser')
                 
-                # Remove script and style elements
                 for script in soup(["script", "style"]):
                     script.decompose()
                 
-                # Extract title
                 title = soup.find('title')
                 title_text = title.get_text().strip() if title else "Untitled"
                 
-                # Extract main content
                 content_tags = soup.find_all(['p', 'h1', 'h2', 'h3', 'article'])
                 content = ' '.join([tag.get_text().strip() for tag in content_tags])
-                
-                # Clean content
                 content = re.sub(r'\s+', ' ', content).strip()
                 
-                return {"title": title_text, "content": content[:8000]}  # Increased limit
+                return {"title": title_text, "content": content[:8000]}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to crawl URL: {str(e)}")
 
 def calculate_content_optimization(content: str) -> Dict[str, Any]:
     """Calculate readability and content optimization metrics"""
     try:
-        # Calculate readability scores
         flesch_score = textstat.flesch_reading_ease(content)
         flesch_grade = textstat.flesch_kincaid_grade(content)
         
-        # Determine reading level
         if flesch_score >= 90:
             reading_level = "Very Easy (5th grade)"
         elif flesch_score >= 80:
@@ -156,17 +160,14 @@ def calculate_content_optimization(content: str) -> Dict[str, Any]:
         else:
             reading_level = "Very Difficult (College graduate)"
         
-        # Calculate word count
         words = content.split()
         word_count = len(words)
         
-        # Calculate keyword density (top 10 words)
-        words_lower = [w.lower() for w in words if len(w) > 4]  # Filter out short words
+        words_lower = [w.lower() for w in words if len(w) > 4]
         word_freq = Counter(words_lower)
         top_words = dict(word_freq.most_common(10))
         keyword_density = {word: round((count / word_count) * 100, 2) for word, count in top_words.items()}
         
-        # Generate recommendations
         recommendations = []
         if flesch_score < 60:
             recommendations.append("Consider simplifying sentences for better readability")
@@ -363,7 +364,6 @@ def generate_structured_data(title: str, content: str, url: Optional[str], faqs:
         }
     }
     
-    # Add FAQ schema if available
     if faqs:
         structured_data["mainEntity"] = {
             "@type": "FAQPage",
@@ -429,12 +429,11 @@ Provide queries as a JSON array:
 # API Routes
 @api_router.get("/")
 async def root():
-    return {"message": "Organic Traffic Generator API"}
+    return {"message": "Organic Traffic Generator API with Advanced Optimization"}
 
 @api_router.post("/content", response_model=Content)
 async def create_content(input: ContentCreate):
     try:
-        # Extract content based on input type
         if input.input_type == 'url' and input.url:
             crawled = await crawl_url(input.url)
             title = crawled['title']
@@ -445,23 +444,37 @@ async def create_content(input: ContentCreate):
             content = input.content or ""
             url = None
         
-        # Generate all optimizations
+        # Basic optimizations
         metadata = generate_optimized_metadata(title, content)
         content_optimization = calculate_content_optimization(content)
         faqs = generate_faqs(title, content)
         social_posts = generate_social_media_posts(title, content, metadata.get('keywords', []))
         voice_queries = generate_voice_queries(title, content)
         
-        # Generate structured data with FAQs
+        # Advanced optimizations
+        entities = extract_entities(content)
+        citation_snippets = extract_citation_snippets(content, title)
+        topic_authority = calculate_topic_authority(content, metadata.get('keywords', []))
+        semantic_enrichment = generate_semantic_enrichment(content, metadata.get('keywords', []))
+        search_intent = analyze_search_intent(title, content)
+        people_also_ask = generate_people_also_ask(title, content, metadata.get('keywords', []))
+        quality_score = calculate_content_quality_score(
+            content, 
+            entities, 
+            content_optimization.get('readability_score', 50),
+            len(metadata.get('keywords', []))
+        )
+        answer_box_content = generate_answer_box_content(content, metadata.get('keywords', []))
+        internal_linking = generate_internal_linking_suggestions(title, metadata.get('keywords', []))
+        backlink_anchors = generate_backlink_anchor_texts(title, metadata.get('keywords', []))
+        
         structured_data = generate_structured_data(title, content, url, faqs)
         
-        # Generate Open Graph and Twitter Card tags
         optimized_title = metadata.get('optimized_title', title)
         optimized_description = metadata.get('optimized_description', content[:160])
         open_graph_tags = generate_open_graph_tags(optimized_title, optimized_description, url)
         twitter_card_tags = generate_twitter_card_tags(optimized_title, optimized_description)
         
-        # Create content object
         content_obj = Content(
             url=url,
             title=title,
@@ -476,17 +489,28 @@ async def create_content(input: ContentCreate):
             voice_queries=voice_queries,
             content_optimization=content_optimization,
             open_graph_tags=open_graph_tags,
-            twitter_card_tags=twitter_card_tags
+            twitter_card_tags=twitter_card_tags,
+            entities=entities,
+            citation_snippets=citation_snippets,
+            topic_authority=topic_authority,
+            semantic_enrichment=semantic_enrichment,
+            search_intent=search_intent,
+            people_also_ask=people_also_ask,
+            quality_score=quality_score,
+            answer_box_content=answer_box_content,
+            internal_linking=internal_linking,
+            backlink_anchors=backlink_anchors
         )
         
-        # Save to database
+        # Calculate freshness
+        content_obj.freshness = calculate_content_freshness(content_obj.created_at)
+        
         doc = content_obj.model_dump()
         doc['created_at'] = doc['created_at'].isoformat()
         doc['updated_at'] = doc['updated_at'].isoformat()
         
         await db.contents.insert_one(doc)
         
-        # Generate standard synthetic queries
         queries = await generate_synthetic_queries(content_obj.id, title, content)
         for query in queries:
             query_obj = SyntheticQuery(
@@ -500,7 +524,6 @@ async def create_content(input: ContentCreate):
             query_doc['created_at'] = query_doc['created_at'].isoformat()
             await db.queries.insert_one(query_doc)
         
-        # Store voice queries as well
         for voice_query in voice_queries:
             query_obj = SyntheticQuery(
                 content_id=content_obj.id,
@@ -541,7 +564,6 @@ async def get_content(content_id: str):
     if isinstance(content.get('updated_at'), str):
         content['updated_at'] = datetime.fromisoformat(content['updated_at'])
     
-    # Increment views
     await db.contents.update_one(
         {"id": content_id},
         {"$inc": {"views": 1}}
@@ -555,7 +577,6 @@ async def delete_content(content_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Content not found")
     
-    # Delete associated queries
     await db.queries.delete_many({"content_id": content_id})
     
     return {"message": "Content deleted successfully"}
@@ -572,20 +593,15 @@ async def get_content_queries(content_id: str):
 
 @api_router.get("/analytics", response_model=AnalyticsData)
 async def get_analytics():
-    # Get total content count
     total_content = await db.contents.count_documents({})
-    
-    # Get total queries count
     total_queries = await db.queries.count_documents({})
     
-    # Calculate average performance score
     pipeline = [
         {"$group": {"_id": None, "avg_score": {"$avg": "$performance_score"}}}
     ]
     avg_result = await db.contents.aggregate(pipeline).to_list(1)
     avg_score = avg_result[0]['avg_score'] if avg_result else 0
     
-    # Calculate average readability score
     readability_pipeline = [
         {"$match": {"content_optimization.readability_score": {"$exists": True}}},
         {"$group": {"_id": None, "avg_readability": {"$avg": "$content_optimization.readability_score"}}}
@@ -593,12 +609,17 @@ async def get_analytics():
     readability_result = await db.contents.aggregate(readability_pipeline).to_list(1)
     avg_readability = readability_result[0]['avg_readability'] if readability_result else 0
     
-    # Get top performing content
+    quality_pipeline = [
+        {"$match": {"quality_score.overall_quality": {"$exists": True}}},
+        {"$group": {"_id": None, "avg_quality": {"$avg": "$quality_score.overall_quality"}}}
+    ]
+    quality_result = await db.contents.aggregate(quality_pipeline).to_list(1)
+    avg_quality = quality_result[0]['avg_quality'] if quality_result else 0
+    
     top_content = await db.contents.find(
         {}, {"_id": 0, "id": 1, "title": 1, "performance_score": 1, "views": 1}
     ).sort("performance_score", -1).limit(5).to_list(5)
     
-    # Get recent queries
     recent_queries = await db.queries.find(
         {}, {"_id": 0, "query": 1, "relevance_score": 1, "query_type": 1, "created_at": 1}
     ).sort("created_at", -1).limit(10).to_list(10)
@@ -608,11 +629,11 @@ async def get_analytics():
         total_queries=total_queries,
         avg_performance_score=round(avg_score, 2),
         avg_readability_score=round(avg_readability, 2),
+        avg_quality_score=round(avg_quality, 2),
         top_performing=top_content,
         recent_queries=recent_queries
     )
 
-# Include the router in the main app
 app.include_router(api_router)
 
 app.add_middleware(
@@ -623,7 +644,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
