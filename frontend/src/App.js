@@ -17,7 +17,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/add" element={<AddContent />} />
-          <Route path="/content/:id" element={<ContentDetails />} />
+          <Route path="/content/:id" element={<AdvancedContentDetails />} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-right" />
