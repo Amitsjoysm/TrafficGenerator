@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import axios from "axios";
 import Dashboard from "./pages/Dashboard";
 import AddContent from "./pages/AddContent";
-import ContentDetails from "./pages/ContentDetails";
+import AdvancedContentDetails from "./pages/AdvancedContentDetails";
 import { Toaster } from "./components/ui/sonner";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
