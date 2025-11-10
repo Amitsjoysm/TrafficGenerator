@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Response
+from fastapi.responses import PlainTextResponse, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -30,6 +31,12 @@ from advanced_optimization import (
     calculate_content_freshness
 )
 
+# Import new services
+from config import config
+from services.seo_service import SEOService
+from services.keyword_service import KeywordService
+from services.export_service import ExportService
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -40,6 +47,11 @@ db = client[os.environ['DB_NAME']]
 
 # Groq client
 groq_client = Groq(api_key=os.environ['GROQ_API_KEY'])
+
+# Initialize services
+seo_service = SEOService(groq_client)
+keyword_service = KeywordService(groq_client)
+export_service = ExportService()
 
 # Create the main app without a prefix
 app = FastAPI()
