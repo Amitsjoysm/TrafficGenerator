@@ -498,6 +498,15 @@ async def create_content(input: ContentCreate):
         open_graph_tags = generate_open_graph_tags(optimized_title, optimized_description, url)
         twitter_card_tags = generate_twitter_card_tags(optimized_title, optimized_description)
         
+        # NEW: Production-ready features
+        lsi_keywords = seo_service.generate_lsi_keywords(content, metadata.get('keywords', []))
+        serp_optimization = seo_service.generate_serp_optimization(title, content, metadata.get('keywords', []))
+        meta_preview = seo_service.generate_meta_preview(optimized_title, optimized_description, url)
+        
+        # Generate unique share ID
+        share_id = str(uuid.uuid4())[:8]
+        canonical_tags = seo_service.generate_canonical_tags(url, share_id)
+        
         content_obj = Content(
             url=url,
             title=title,
@@ -522,11 +531,37 @@ async def create_content(input: ContentCreate):
             quality_score=quality_score,
             answer_box_content=answer_box_content,
             internal_linking=internal_linking,
-            backlink_anchors=backlink_anchors
+            backlink_anchors=backlink_anchors,
+            lsi_keywords=lsi_keywords,
+            serp_optimization=serp_optimization,
+            meta_preview=meta_preview,
+            canonical_tags=canonical_tags,
+            share_id=share_id
         )
         
         # Calculate freshness
         content_obj.freshness = calculate_content_freshness(content_obj.created_at)
+        
+        # Calculate keyword gap analysis
+        content_obj.keyword_gap = keyword_service.analyze_keyword_gap(content, metadata.get('keywords', []))
+        
+        # Predict traffic potential
+        content_obj.traffic_prediction = keyword_service.predict_traffic(
+            metadata.get('keywords', []),
+            quality_score.get('overall_quality', 50),
+            content_optimization.get('readability_score', 50),
+            content_optimization.get('word_count', 0),
+            bool(serp_optimization.get('featured_snippet', {}).get('optimized'))
+        )
+        
+        # Generate topic clusters
+        content_obj.topic_clusters = keyword_service.generate_topic_clusters(
+            metadata.get('keywords', []),
+            content
+        )
+        
+        # Calculate comprehensive SEO score
+        content_obj.seo_score = seo_service.calculate_seo_score(content_obj.model_dump())
         
         doc = content_obj.model_dump()
         doc['created_at'] = doc['created_at'].isoformat()
