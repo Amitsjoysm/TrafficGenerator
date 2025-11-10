@@ -102,6 +102,17 @@ class Content(BaseModel):
     backlink_anchors: List[Dict[str, str]] = Field(default_factory=list)
     freshness: Optional[Dict[str, Any]] = None
     
+    # New production features
+    lsi_keywords: List[str] = Field(default_factory=list)
+    serp_optimization: Optional[Dict[str, Any]] = None
+    keyword_gap: Optional[Dict[str, Any]] = None
+    traffic_prediction: Optional[Dict[str, Any]] = None
+    topic_clusters: Optional[Dict[str, Any]] = None
+    meta_preview: Optional[Dict[str, Any]] = None
+    seo_score: Optional[Dict[str, Any]] = None
+    canonical_tags: Optional[Dict[str, str]] = None
+    share_id: Optional[str] = None
+    
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
