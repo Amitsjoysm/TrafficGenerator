@@ -692,6 +692,154 @@ async def get_analytics():
         recent_queries=recent_queries
     )
 
+# NEW ENDPOINTS FOR PRODUCTION FEATURES
+
+@api_router.get("/content/{content_id}/export/json")
+async def export_content_json(content_id: str):
+    """Export content as JSON"""
+    content = await db.contents.find_one({"id": content_id}, {"_id": 0})
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    json_data = export_service.export_to_json(content)
+    return Response(content=json_data, media_type="application/json", 
+                   headers={"Content-Disposition": f"attachment; filename=content_{content_id}.json"})
+
+@api_router.get("/content/{content_id}/export/csv")
+async def export_content_csv(content_id: str):
+    """Export content as CSV"""
+    content = await db.contents.find_one({"id": content_id}, {"_id": 0})
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    csv_data = export_service.export_to_csv(content)
+    return Response(content=csv_data, media_type="text/csv",
+                   headers={"Content-Disposition": f"attachment; filename=content_{content_id}.csv"})
+
+@api_router.get("/content/{content_id}/export/html")
+async def export_content_html(content_id: str):
+    """Export content as optimized HTML"""
+    content = await db.contents.find_one({"id": content_id}, {"_id": 0})
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    html_data = export_service.export_to_html(content)
+    return Response(content=html_data, media_type="text/html",
+                   headers={"Content-Disposition": f"attachment; filename=content_{content_id}.html"})
+
+@api_router.get("/sitemap.xml", response_class=PlainTextResponse)
+async def get_sitemap():
+    """Generate XML sitemap for all content"""
+    contents = await db.contents.find({}, {"_id": 0}).to_list(1000)
+    sitemap_xml = export_service.export_sitemap_xml(contents)
+    return Response(content=sitemap_xml, media_type="application/xml")
+
+@api_router.get("/robots.txt", response_class=PlainTextResponse)
+async def get_robots_txt():
+    """Generate robots.txt file"""
+    # Get base URL from environment or use default
+    base_url = os.environ.get('BASE_URL', 'https://yoursite.com')
+    sitemap_url = f"{base_url}/api/sitemap.xml"
+    
+    robots_txt = export_service.generate_robots_txt(allow_all=True, sitemap_url=sitemap_url)
+    return Response(content=robots_txt, media_type="text/plain")
+
+@api_router.get("/share/{share_id}")
+async def get_shared_content(share_id: str):
+    """Get publicly shared content by share ID"""
+    content = await db.contents.find_one({"share_id": share_id}, {"_id": 0})
+    if not content:
+        raise HTTPException(status_code=404, detail="Shared content not found")
+    
+    # Convert datetime fields
+    if isinstance(content.get('created_at'), str):
+        content['created_at'] = datetime.fromisoformat(content['created_at'])
+    if isinstance(content.get('updated_at'), str):
+        content['updated_at'] = datetime.fromisoformat(content['updated_at'])
+    
+    return content
+
+@api_router.post("/content/{content_id}/refresh")
+async def refresh_content(content_id: str):
+    """Refresh content optimization (for content freshness)"""
+    content = await db.contents.find_one({"id": content_id}, {"_id": 0})
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    # Recalculate all optimizations
+    title = content.get('title', '')
+    content_text = content.get('content', '')
+    keywords = content.get('keywords', [])
+    
+    # Update metadata
+    metadata = generate_optimized_metadata(title, content_text)
+    
+    # Update freshness
+    freshness = calculate_content_freshness(datetime.now(timezone.utc))
+    
+    # Update SEO score
+    seo_score = seo_service.calculate_seo_score(content)
+    
+    # Update in database
+    await db.contents.update_one(
+        {"id": content_id},
+        {
+            "$set": {
+                "optimized_title": metadata.get('optimized_title', title),
+                "optimized_description": metadata.get('optimized_description', content_text[:160]),
+                "keywords": metadata.get('keywords', keywords),
+                "performance_score": metadata.get('performance_score', 50),
+                "freshness": freshness,
+                "seo_score": seo_score,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    )
+    
+    return {"message": "Content refreshed successfully", "freshness": freshness, "seo_score": seo_score}
+
+@api_router.get("/content/{content_id}/traffic-insights")
+async def get_traffic_insights(content_id: str):
+    """Get detailed traffic prediction and insights"""
+    content = await db.contents.find_one({"id": content_id}, {"_id": 0})
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+    
+    return {
+        "traffic_prediction": content.get('traffic_prediction', {}),
+        "keyword_gap": content.get('keyword_gap', {}),
+        "topic_clusters": content.get('topic_clusters', {}),
+        "serp_optimization": content.get('serp_optimization', {}),
+        "freshness": content.get('freshness', {}),
+        "recommendations": _generate_traffic_recommendations(content)
+    }
+
+def _generate_traffic_recommendations(content: Dict[str, Any]) -> List[str]:
+    """Generate actionable traffic improvement recommendations"""
+    recommendations = []
+    
+    # Check freshness
+    freshness = content.get('freshness', {})
+    if freshness.get('needs_update'):
+        recommendations.append(f"Content is {freshness.get('status', 'aging')} - consider updating with fresh information")
+    
+    # Check keyword gap
+    keyword_gap = content.get('keyword_gap', {})
+    if keyword_gap.get('coverage_score', 100) < 70:
+        recommendations.append(f"Keyword coverage is {keyword_gap.get('coverage_score')}% - add missing related keywords")
+    
+    # Check SEO score
+    seo_score = content.get('seo_score', {})
+    if seo_score.get('overall_score', 100) < 80:
+        recommendations.extend(seo_score.get('recommendations', []))
+    
+    # Check traffic prediction
+    traffic = content.get('traffic_prediction', {})
+    if traffic.get('recommendations'):
+        recommendations.extend(traffic.get('recommendations', []))
+    
+    return recommendations[:10]  # Limit to top 10
+
 app.include_router(api_router)
 
 app.add_middleware(
