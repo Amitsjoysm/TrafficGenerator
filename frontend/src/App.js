@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import axios from "axios";
 import Dashboard from "./pages/Dashboard";
 import AddContent from "./pages/AddContent";
-import AdvancedContentDetails from "./pages/AdvancedContentDetails";
+import EnhancedContentDetails from "./pages/EnhancedContentDetails";
 import { Toaster } from "./components/ui/sonner";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -17,7 +17,8 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/add" element={<AddContent />} />
-          <Route path="/content/:id" element={<AdvancedContentDetails />} />
+          <Route path="/content/:id" element={<EnhancedContentDetails />} />
+          <Route path="/share/:shareId" element={<EnhancedContentDetails />} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-right" />
